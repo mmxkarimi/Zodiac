@@ -1,0 +1,145 @@
+name: Build and Release Application
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BIN_NAME: zodiac
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-version:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      tag: ${{ steps.get_version.outputs.tag }}
+      should_release: ${{ steps.get_version.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from Cargo.toml
+        id: get_version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(sed -nE 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' Cargo.toml | head -n 1)
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not extract version from Cargo.toml"
+            exit 1
+          fi
+          TAG="v$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Found version $VERSION (tag: $TAG)"
+
+          # Check if this release already exists on GitHub
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $TAG already exists. Skipping build and release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Release $TAG does not exist. Proceeding with build and release."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+          rustup default stable
+
+      - name: Cache cargo files
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package zip and SHA256 (Linux and macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          NAME="${BIN_NAME}-${{ needs.check-version.outputs.tag }}-${{ matrix.target }}"
+          mkdir "$NAME"
+          cp "target/${{ matrix.target }}/release/${BIN_NAME}" "$NAME/"
+          cp README.md LICENSE.md "$NAME/"
+          zip -r "$NAME.zip" "$NAME"
+          shasum -a 256 "$NAME.zip" > "$NAME.zip.sha256"
+
+      - name: Package zip and SHA256 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "$env:BIN_NAME-${{ needs.check-version.outputs.tag }}-${{ matrix.target }}"
+          New-Item -ItemType Directory $name | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/$env:BIN_NAME.exe" $name
+          Copy-Item README.md, LICENSE.md $name
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -FilePath "$name.zip.sha256" -Encoding ascii
+
+      - name: Upload files
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            *.zip
+            *.zip.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [check-version, build]
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all files
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Check the SHA256 files
+        working-directory: dist
+        run: sha256sum -c *.sha256
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ needs.check-version.outputs.tag }}" dist/* \
+            --repo "${{ github.repository }}" \
+            --title "${{ needs.check-version.outputs.tag }}" \
+            --generate-notes

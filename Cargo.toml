@@ -1,0 +1,17 @@
+[package]
+name = "zodiac"
+version = "0.1.0"
+edition = "2024"
+description = "Fast, lightweight MCP server for Kiwix HTTP Server with minimal dependencies"
+
+[dependencies]
+http = "1.5.0"
+json = "0.12.4"
+
+[lib]
+name = "zodiac"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zodiac"
+path = "src/main.rs"
