@@ -1,13 +1,14 @@
-use crate::kiwix::KiwixClient;
+use crate::zim::ZimLibrary;
 use json::JsonValue;
+use std::sync::Arc;
 
 pub struct McpServer {
-    pub client: KiwixClient,
+    pub library: Arc<ZimLibrary>,
 }
 
 impl McpServer {
-    pub fn new(client: KiwixClient) -> Self {
-        Self { client }
+    pub fn new(library: Arc<ZimLibrary>) -> Self {
+        Self { library }
     }
 
     pub fn handle_message(&self, raw: &str) -> Option<String> {
@@ -91,16 +92,16 @@ impl McpServer {
     fn handle_tools_list(&self) -> JsonValue {
         let tools = json::array![
             json::object! {
-                "name" => "kiwix_list_books",
-                "description" => "List all available books/ZIM files hosted on the Kiwix server, including their IDs, titles, languages, and article counts.",
+                "name" => "zim_list_books",
+                "description" => "List all loaded books/ZIM files, including their IDs, titles, languages, and article counts.",
                 "inputSchema" => json::object! {
                     "type" => "object",
                     "properties" => json::object! {}
                 }
             },
             json::object! {
-                "name" => "kiwix_suggest",
-                "description" => "Get search suggestions/completions for a term from Kiwix.",
+                "name" => "zim_suggest",
+                "description" => "Get instant prefix search suggestions/completions for a term from a ZIM archive.",
                 "inputSchema" => json::object! {
                     "type" => "object",
                     "properties" => json::object! {
@@ -121,8 +122,8 @@ impl McpServer {
                 }
             },
             json::object! {
-                "name" => "kiwix_search",
-                "description" => "Search for articles matching a query across books or within a specific book in Kiwix.",
+                "name" => "zim_search",
+                "description" => "Search for articles matching a query across loaded ZIM books or within a specific book.",
                 "inputSchema" => json::object! {
                     "type" => "object",
                     "properties" => json::object! {
@@ -143,18 +144,18 @@ impl McpServer {
                 }
             },
             json::object! {
-                "name" => "kiwix_read_page",
-                "description" => "Read an article or page from a Kiwix book. Returns clean, formatted Markdown by default.",
+                "name" => "zim_read_page",
+                "description" => "Read an article or page from a ZIM book. Returns clean, formatted Markdown by default.",
                 "inputSchema" => json::object! {
                     "type" => "object",
                     "properties" => json::object! {
-                        "book" => json::object! {
-                            "type" => "string",
-                            "description" => "Book ID or name (e.g. from kiwix_list_books or search results)"
-                        },
                         "path" => json::object! {
                             "type" => "string",
-                            "description" => "Article title or path (e.g. 'Philosophy' or 'A/Albert_Einstein.html')"
+                            "description" => "Article title or path (e.g. 'Philosophy' or 'Albert_Einstein')"
+                        },
+                        "book" => json::object! {
+                            "type" => "string",
+                            "description" => "Optional book ID or name (defaults to first book)"
                         },
                         "raw_html" => json::object! {
                             "type" => "boolean",
@@ -165,12 +166,12 @@ impl McpServer {
                             "description" => "Maximum characters to return before truncation (default: 15000)"
                         }
                     },
-                    "required" => json::array!["book", "path"]
+                    "required" => json::array!["path"]
                 }
             },
             json::object! {
-                "name" => "kiwix_random",
-                "description" => "Retrieve a random article from a Kiwix book, formatted as Markdown.",
+                "name" => "zim_random",
+                "description" => "Retrieve a random article from a ZIM book, formatted as Markdown.",
                 "inputSchema" => json::object! {
                     "type" => "object",
                     "properties" => json::object! {
@@ -182,8 +183,8 @@ impl McpServer {
                 }
             },
             json::object! {
-                "name" => "kiwix_status",
-                "description" => "Check Kiwix server connectivity, latency, and available books count.",
+                "name" => "zim_status",
+                "description" => "Check Zodiac embedded ZIM server status, loaded archives, and total articles.",
                 "inputSchema" => json::object! {
                     "type" => "object",
                     "properties" => json::object! {}
@@ -197,16 +198,18 @@ impl McpServer {
     }
 
     fn handle_tools_call(&self, params: &JsonValue) -> Result<JsonValue, (i32, String)> {
-        let name = params["name"].as_str().ok_or((-32602, "Missing tool name".to_string()))?;
+        let name = params["name"]
+            .as_str()
+            .ok_or((-32602, "Missing tool name".to_string()))?;
         let args = &params["arguments"];
 
         let call_res = match name {
-            "kiwix_list_books" => self.tool_list_books(),
-            "kiwix_suggest" => self.tool_suggest(args),
-            "kiwix_search" => self.tool_search(args),
-            "kiwix_read_page" => self.tool_read_page(args),
-            "kiwix_random" => self.tool_random(args),
-            "kiwix_status" => self.tool_status(),
+            "zim_list_books" => self.tool_list_books(),
+            "zim_suggest" => self.tool_suggest(args),
+            "zim_search" => self.tool_search(args),
+            "zim_read_page" => self.tool_read_page(args),
+            "zim_random" => self.tool_random(args),
+            "zim_status" => self.tool_status(),
             _ => return Err((-32601, format!("Unknown tool '{}'", name))),
         };
 
@@ -233,7 +236,7 @@ impl McpServer {
     }
 
     fn tool_list_books(&self) -> Result<String, String> {
-        let books = self.client.list_books()?;
+        let books = self.library.list_books();
         let mut arr = JsonValue::new_array();
         for b in &books {
             let _ = arr.push(b.to_json());
@@ -242,20 +245,24 @@ impl McpServer {
     }
 
     fn tool_suggest(&self, args: &JsonValue) -> Result<String, String> {
-        let query = args["query"].as_str().ok_or("Missing required parameter 'query'")?;
+        let query = args["query"]
+            .as_str()
+            .ok_or("Missing required parameter 'query'")?;
         let book = args["book"].as_str();
         let limit = args["limit"].as_usize();
 
-        let suggestions = self.client.suggest(query, book, limit)?;
+        let suggestions = self.library.suggest(query, book, limit)?;
         Ok(suggestions.pretty(2))
     }
 
     fn tool_search(&self, args: &JsonValue) -> Result<String, String> {
-        let query = args["query"].as_str().ok_or("Missing required parameter 'query'")?;
+        let query = args["query"]
+            .as_str()
+            .ok_or("Missing required parameter 'query'")?;
         let book = args["book"].as_str();
         let count = args["count"].as_usize();
 
-        let results = self.client.search(query, book, count)?;
+        let results = self.library.search(query, book, count)?;
         let mut arr = JsonValue::new_array();
         for r in results {
             let _ = arr.push(r.to_json());
@@ -264,22 +271,26 @@ impl McpServer {
     }
 
     fn tool_read_page(&self, args: &JsonValue) -> Result<String, String> {
-        let book = args["book"].as_str().ok_or("Missing required parameter 'book'")?;
-        let path = args["path"].as_str().ok_or("Missing required parameter 'path'")?;
+        let path = args["path"]
+            .as_str()
+            .ok_or("Missing required parameter 'path'")?;
+        let book = args["book"].as_str().unwrap_or("");
         let raw_html = args["raw_html"].as_bool().unwrap_or(false);
         let max_length = args["max_length"].as_usize();
 
-        self.client.read_page(book, path, raw_html, max_length)
+        let book_opt = if book.is_empty() { None } else { Some(book) };
+        let archive = self.library.resolve_archive(book_opt)?;
+        archive.read_page(path, raw_html, max_length)
     }
 
     fn tool_random(&self, args: &JsonValue) -> Result<String, String> {
         let book = args["book"].as_str();
-        let article = self.client.random_page(book)?;
+        let article = self.library.random_page(book)?;
         Ok(article.pretty(2))
     }
 
     fn tool_status(&self) -> Result<String, String> {
-        let status = self.client.server_status()?;
+        let status = self.library.server_status()?;
         Ok(status.pretty(2))
     }
 }

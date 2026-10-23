@@ -1,23 +1,26 @@
-use zodiac::{KiwixClient, McpServer};
 use std::env;
 use std::io::{self, BufRead, Write};
+use std::path::Path;
+use std::sync::Arc;
+use zodiac::{McpServer, ZimLibrary};
 
 fn print_help() {
     eprintln!(
-        "Kiwix Model Context Protocol (MCP) Server\n\n\
-        Usage: zodiac [OPTIONS]\n\n\
+        "Zodiac - Embedded ZIM Reader & Model Context Protocol (MCP) Server\n\n\
+        Usage: zodiac [OPTIONS] [ZIM_FILES...]\n\n\
         Options:\n\
-          -u, --url <URL>     Kiwix HTTP server URL (default: KIWIX_URL env or http://127.0.0.1:8080)\n\
-              --port <PORT>   Port on localhost (shortcut for http://127.0.0.1:<PORT>)\n\
+          -z, --zim <PATH>    Path to a .zim file (can be specified multiple times)\n\
           -h, --help          Print help information\n\
           -v, --version       Print version information\n\n\
+        Environment:\n\
+          ZIM_PATH            Semicolon-separated (or colon-separated) paths to .zim files\n\n\
         Transport:\n\
           Runs as an MCP server over standard input/output (stdio).\n"
     );
 }
 
 fn main() {
-    let mut kiwix_url = env::var("KIWIX_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
+    let mut zim_paths: Vec<String> = Vec::new();
 
     let args: Vec<String> = env::args().collect();
     let mut i = 1;
@@ -31,28 +34,18 @@ fn main() {
                 eprintln!("zodiac {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
-            "-u" | "--url" => {
+            "-z" | "--zim" => {
                 if i + 1 < args.len() {
-                    kiwix_url = args[i + 1].clone();
+                    zim_paths.push(args[i + 1].clone());
                     i += 1;
                 } else {
-                    eprintln!("[ERROR] --url requires an argument");
-                    std::process::exit(1);
-                }
-            }
-            "--port" => {
-                if i + 1 < args.len() {
-                    let port = &args[i + 1];
-                    kiwix_url = format!("http://127.0.0.1:{}", port);
-                    i += 1;
-                } else {
-                    eprintln!("[ERROR] --port requires an argument");
+                    eprintln!("[ERROR] --zim requires a file path argument");
                     std::process::exit(1);
                 }
             }
             other => {
                 if !other.starts_with('-') {
-                    kiwix_url = other.to_string();
+                    zim_paths.push(other.to_string());
                 } else {
                     eprintln!("[WARN] Unknown option: {}", other);
                 }
@@ -61,32 +54,62 @@ fn main() {
         i += 1;
     }
 
-    eprintln!("[INFO] Starting Kiwix MCP server (stdio transport)");
-    eprintln!("[INFO] Target Kiwix server: {}", kiwix_url);
-
-    let client = KiwixClient::new(&kiwix_url);
-
-    // Initial check of server connectivity
-    match client.list_books() {
-        Ok(books) => {
-            eprintln!(
-                "[INFO] Connected to Kiwix! Found {} book(s):",
-                books.len()
-            );
-            for b in &books {
-                eprintln!(
-                    "  - [{}] {} ({} articles)",
-                    b.content_id, b.title, b.article_count
-                );
+    // Fallback to ZIM_PATH environment variable if no paths provided via CLI
+    if zim_paths.is_empty() {
+        if let Ok(env_path) = env::var("ZIM_PATH") {
+            let separator = if cfg!(windows) { ';' } else { ':' };
+            for part in env_path.split(separator) {
+                let trimmed = part.trim();
+                if !trimmed.is_empty() {
+                    zim_paths.push(trimmed.to_string());
+                }
             }
-        }
-        Err(e) => {
-            eprintln!("[WARN] Could not reach Kiwix at {}: {}", kiwix_url, e);
-            eprintln!("[WARN] Ensure kiwix-serve is running, e.g.: kiwix-serve --port=8080 <file.zim>");
         }
     }
 
-    let server = McpServer::new(client);
+    if zim_paths.is_empty() {
+        eprintln!("[ERROR] No ZIM files specified.");
+        eprintln!("[INFO] Usage: zodiac --zim <path-to-file.zim>");
+        eprintln!("[INFO] Or set the ZIM_PATH environment variable.");
+        std::process::exit(1);
+    }
+
+    eprintln!("[INFO] Starting Zodiac MCP server (stdio transport)");
+
+    let mut library = ZimLibrary::new();
+
+    for p in &zim_paths {
+        let path = Path::new(p);
+        if !path.exists() {
+            eprintln!("[ERROR] File does not exist: {}", p);
+            continue;
+        }
+
+        match library.load_file(path) {
+            Ok(_) => {
+                let last = library.archives.last().unwrap();
+                eprintln!(
+                    "[INFO] Loaded '{}' ({}) - {} articles [{}]",
+                    last.info.title, last.info.id, last.info.article_count, p
+                );
+            }
+            Err(e) => {
+                eprintln!("[ERROR] Failed to load '{}': {}", p, e);
+            }
+        }
+    }
+
+    if library.is_empty() {
+        eprintln!("[FATAL] Could not load any valid ZIM archives. Exiting.");
+        std::process::exit(1);
+    }
+
+    eprintln!(
+        "[INFO] Zodiac ready with {} archive(s). Awaiting MCP commands on stdin...",
+        library.len()
+    );
+
+    let server = McpServer::new(Arc::new(library));
 
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -95,7 +118,7 @@ fn main() {
     for line in stdin.lock().lines() {
         match line {
             Ok(line_str) => {
-                let trimmed = line_str.trim();
+                let trimmed = line_str.trim().trim_start_matches('\u{feff}');
                 if trimmed.is_empty() {
                     continue;
                 }
@@ -117,5 +140,5 @@ fn main() {
         }
     }
 
-    eprintln!("[INFO] Kiwix MCP server stopped.");
+    eprintln!("[INFO] Zodiac MCP server stopped.");
 }

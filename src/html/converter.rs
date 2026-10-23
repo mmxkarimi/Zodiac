@@ -40,9 +40,21 @@ struct Dom {
 }
 
 impl Dom {
-    fn add(&mut self, parent: usize, name: Option<String>, text: String, attrs: HashMap<String, String>) -> usize {
+    fn add(
+        &mut self,
+        parent: usize,
+        name: Option<String>,
+        text: String,
+        attrs: HashMap<String, String>,
+    ) -> usize {
         let id = self.nodes.len();
-        self.nodes.push(Node { name, text, attrs, children: Vec::new(), parent: Some(parent) });
+        self.nodes.push(Node {
+            name,
+            text,
+            attrs,
+            children: Vec::new(),
+            parent: Some(parent),
+        });
         self.nodes[parent].children.push(id);
         id
     }
@@ -69,24 +81,78 @@ struct Part {
 fn is_void(name: &str) -> bool {
     matches!(
         name,
-        "area" | "base" | "br" | "col" | "embed" | "hr" | "img" | "input" | "link" | "meta" | "source" | "track" | "wbr"
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "source"
+            | "track"
+            | "wbr"
     )
 }
 
 fn is_skip_tag(name: &str) -> bool {
     matches!(
         name,
-        "script" | "style" | "head" | "title" | "template" | "noscript" | "svg" | "canvas" | "iframe" | "meta" | "link"
+        "script"
+            | "style"
+            | "head"
+            | "title"
+            | "template"
+            | "noscript"
+            | "svg"
+            | "canvas"
+            | "iframe"
+            | "meta"
+            | "link"
     )
 }
 
 fn is_block(name: &str) -> bool {
     matches!(
         name,
-        "address" | "article" | "aside" | "blockquote" | "body" | "center" | "dd" | "details" | "div" | "dl" | "dt"
-            | "fieldset" | "figcaption" | "figure" | "footer" | "form" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
-            | "header" | "hgroup" | "hr" | "html" | "li" | "main" | "nav" | "ol" | "p" | "pre" | "section"
-            | "summary" | "table" | "ul"
+        "address"
+            | "article"
+            | "aside"
+            | "blockquote"
+            | "body"
+            | "center"
+            | "dd"
+            | "details"
+            | "div"
+            | "dl"
+            | "dt"
+            | "fieldset"
+            | "figcaption"
+            | "figure"
+            | "footer"
+            | "form"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "header"
+            | "hgroup"
+            | "hr"
+            | "html"
+            | "li"
+            | "main"
+            | "nav"
+            | "ol"
+            | "p"
+            | "pre"
+            | "section"
+            | "summary"
+            | "table"
+            | "ul"
     )
 }
 
@@ -287,7 +353,13 @@ fn paragraph(s: &str) -> String {
     if s.is_empty() {
         return String::new();
     }
-    replace_breaks(s, |count| if count == 1 { "\\\n".to_string() } else { "\n\n".to_string() })
+    replace_breaks(s, |count| {
+        if count == 1 {
+            "\\\n".to_string()
+        } else {
+            "\n\n".to_string()
+        }
+    })
 }
 
 /// Same, but for places that must stay on one line (headings, table cells, link text).
@@ -329,8 +401,10 @@ fn escape(t: &str) -> String {
                 sb.push(ch);
             }
             '_' => {
-                let in_word =
-                    i > 0 && i + 1 < c.len() && c[i - 1].is_alphanumeric() && c[i + 1].is_alphanumeric();
+                let in_word = i > 0
+                    && i + 1 < c.len()
+                    && c[i - 1].is_alphanumeric()
+                    && c[i + 1].is_alphanumeric();
                 if !in_word {
                     sb.push('\\');
                 }
@@ -467,7 +541,10 @@ fn code_span(code: &str) -> String {
 fn title_part(title: Option<&str>) -> String {
     match title {
         Some(t) if !t.trim().is_empty() => {
-            let t = collapse_ws(t).trim().replace('\\', "\\\\").replace('"', "\\\"");
+            let t = collapse_ws(t)
+                .trim()
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"");
             format!(" \"{}\"", t)
         }
         _ => String::new(),
@@ -729,7 +806,11 @@ fn blocks_of(dom: &Dom, kids: &[usize], tight: bool) -> String {
                         "ol" => 'o',
                         _ => ' ',
                     };
-                    parts.push(Part { text: b, kind, inline: false });
+                    parts.push(Part {
+                        text: b,
+                        kind,
+                        inline: false,
+                    });
                 }
             }
             _ => render_inline(dom, c, &mut run),
@@ -759,7 +840,11 @@ fn flush_run(run: &mut String, parts: &mut Vec<Part>) {
     let t = paragraph(run);
     run.clear();
     if !t.is_empty() {
-        parts.push(Part { text: t, kind: ' ', inline: true });
+        parts.push(Part {
+            text: t,
+            kind: ' ',
+            inline: true,
+        });
     }
 }
 
@@ -791,7 +876,13 @@ fn render_block(dom: &Dom, id: usize) -> String {
             }
             inner
                 .split('\n')
-                .map(|l| if l.is_empty() { ">".to_string() } else { format!("> {}", l) })
+                .map(|l| {
+                    if l.is_empty() {
+                        ">".to_string()
+                    } else {
+                        format!("> {}", l)
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("\n")
         }
@@ -815,7 +906,11 @@ fn code_block(dom: &Dom, pre: usize) -> String {
 }
 
 fn find_lang(dom: &Dom, pre: usize) -> String {
-    let first = dom.nodes[pre].children.iter().copied().find(|&c| dom.name(c).is_some());
+    let first = dom.nodes[pre]
+        .children
+        .iter()
+        .copied()
+        .find(|&c| dom.name(c).is_some());
 
     for cand in [Some(pre), first].iter().flatten() {
         let cand = *cand;
@@ -843,7 +938,9 @@ fn find_lang(dom: &Dom, pre: usize) -> String {
 
 fn clean_lang(s: &str) -> String {
     s.chars()
-        .filter(|&c| c.is_alphanumeric() || c == '-' || c == '+' || c == '#' || c == '.' || c == '_')
+        .filter(|&c| {
+            c.is_alphanumeric() || c == '-' || c == '+' || c == '#' || c == '.' || c == '_'
+        })
         .collect()
 }
 
@@ -866,7 +963,11 @@ fn details(dom: &Dom, id: usize) -> String {
     let body = blocks_of(dom, &rest, false);
 
     let mut sb = String::new();
-    sb.push_str(if dom.has(id, "open") { "<details open>" } else { "<details>" });
+    sb.push_str(if dom.has(id, "open") {
+        "<details open>"
+    } else {
+        "<details>"
+    });
     sb.push('\n');
     if !summary.is_empty() {
         sb.push_str("<summary>");
@@ -890,7 +991,10 @@ fn render_list(dom: &Dom, list: usize) -> String {
     let ordered = dom.name(list) == Some("ol");
     let mut num: i64 = 1;
     if ordered {
-        if let Some(start) = dom.attr(list, "start").and_then(|s| s.trim().parse::<i64>().ok()) {
+        if let Some(start) = dom
+            .attr(list, "start")
+            .and_then(|s| s.trim().parse::<i64>().ok())
+        {
             num = start;
         }
     }
@@ -924,17 +1028,29 @@ fn render_list(dom: &Dom, list: usize) -> String {
             kids = vec![child];
         }
 
-        let marker = if ordered { format!("{}. ", num) } else { "- ".to_string() };
+        let marker = if ordered {
+            format!("{}. ", num)
+        } else {
+            "- ".to_string()
+        };
         let mut task = "";
         if let Some(bx) = find_checkbox(dom, &kids) {
-            task = if dom.has(bx, "checked") { "[x] " } else { "[ ] " };
+            task = if dom.has(bx, "checked") {
+                "[x] "
+            } else {
+                "[ ] "
+            };
         }
 
         let content = format!("{}{}", task, blocks_of(dom, &kids, true));
         if content.trim().is_empty() {
             items.push(marker.trim_end().to_string());
         } else {
-            items.push(format!("{}{}", marker, indent(&content, &" ".repeat(marker.len()), false)));
+            items.push(format!(
+                "{}{}",
+                marker,
+                indent(&content, &" ".repeat(marker.len()), false)
+            ));
         }
 
         last_width = marker.len();
@@ -950,7 +1066,9 @@ fn find_checkbox(dom: &Dom, kids: &[usize]) -> Option<usize> {
             None => continue,
         };
         if name == "input"
-            && dom.attr(c, "type").map_or(false, |t| t.eq_ignore_ascii_case("checkbox"))
+            && dom
+                .attr(c, "type")
+                .map_or(false, |t| t.eq_ignore_ascii_case("checkbox"))
         {
             return Some(c);
         }
@@ -1181,10 +1299,15 @@ fn render_inline(dom: &Dom, id: usize, sb: &mut String) {
 
         "img" => {
             let src = dom.attr(id, "src");
-            let alt = collapse_ws(dom.attr(id, "alt").unwrap_or("")).trim().to_string();
+            let alt = collapse_ws(dom.attr(id, "alt").unwrap_or(""))
+                .trim()
+                .to_string();
             match src {
                 Some(s) if !s.trim().is_empty() => {
-                    let alt = alt.replace('\\', "\\\\").replace('[', "\\[").replace(']', "\\]");
+                    let alt = alt
+                        .replace('\\', "\\\\")
+                        .replace('[', "\\[")
+                        .replace(']', "\\]");
                     sb.push_str("![");
                     sb.push_str(&alt);
                     sb.push_str("](");
@@ -1321,7 +1444,8 @@ mod tests {
 
     #[test]
     fn test_nested_list_and_tasks() {
-        let html = "<ul><li>A<ul><li>B</li></ul></li><li><input type=checkbox checked> done</li></ul>";
+        let html =
+            "<ul><li>A<ul><li>B</li></ul></li><li><input type=checkbox checked> done</li></ul>";
         let md = html_to_markdown(html);
         assert_eq!(md, "- A\n  - B\n- [x] done\n");
     }
@@ -1335,7 +1459,8 @@ mod tests {
 
     #[test]
     fn test_code_block_and_escape() {
-        let html = "<pre><code class=\"language-rust\">let a = 1;\n</code></pre><p>1. not a list *x*</p>";
+        let html =
+            "<pre><code class=\"language-rust\">let a = 1;\n</code></pre><p>1. not a list *x*</p>";
         let md = html_to_markdown(html);
         assert!(md.contains("```rust\nlet a = 1;\n```"));
         assert!(md.contains("1\\. not a list \\*x\\*"));
@@ -1343,6 +1468,9 @@ mod tests {
 
     #[test]
     fn test_entities() {
-        assert_eq!(decode_html_entities("a &lt; b &#65; &#x42; &bogus;"), "a < b A B &bogus;");
+        assert_eq!(
+            decode_html_entities("a &lt; b &#65; &#x42; &bogus;"),
+            "a < b A B &bogus;"
+        );
     }
 }
