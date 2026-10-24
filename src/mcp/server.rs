@@ -85,7 +85,8 @@ impl McpServer {
             "serverInfo" => json::object! {
                 "name" => "zodiac",
                 "version" => env!("CARGO_PKG_VERSION")
-            }
+            },
+            "instructions" => "Zodiac provides access to offline ZIM archives (such as Wikipedia). When searching or retrieving information:\n- Always search for broad, high-level concepts, main topics, or entity names (1-3 words max, e.g., 'Photosynthesis', 'Sasanian Empire', 'Quantum mechanics').\n- Never search using full sentences, complex questions, or overly detailed/granular queries (e.g., avoid 'causes of the fall of the Sasanian empire in the 7th century', search 'Fall of the Sasanian Empire' or 'Sasanian Empire' instead).\n- The archive matches against article titles. If a search returns few or no results, make the query broader and shorter.\n- After finding the main article, use `zim_read_page` to inspect the full content and extract specific details."
         }
     }
 
@@ -101,13 +102,13 @@ impl McpServer {
             },
             json::object! {
                 "name" => "zim_suggest",
-                "description" => "Get instant prefix search suggestions/completions for a term from a ZIM archive.",
+                "description" => "Get instant prefix search suggestions/completions for a broad term or title prefix from a ZIM archive.",
                 "inputSchema" => json::object! {
                     "type" => "object",
                     "properties" => json::object! {
                         "query" => json::object! {
                             "type" => "string",
-                            "description" => "Prefix or search term to get suggestions for"
+                            "description" => "Prefix or start of a broad article title (1-2 words). Keep it general and avoid overly specific phrases."
                         },
                         "book" => json::object! {
                             "type" => "string",
@@ -123,13 +124,13 @@ impl McpServer {
             },
             json::object! {
                 "name" => "zim_search",
-                "description" => "Search for articles matching a query across loaded ZIM books or within a specific book.",
+                "description" => "Search for encyclopedia articles across loaded ZIM books or within a specific book. ALWAYS search using broad, general topic names or main concepts (1-3 words) rather than overly specific queries, sentences, or questions. Search broadly to find the relevant article, then use `zim_read_page` to find specific details within the text.",
                 "inputSchema" => json::object! {
                     "type" => "object",
                     "properties" => json::object! {
                         "query" => json::object! {
                             "type" => "string",
-                            "description" => "Search terms or keywords"
+                            "description" => "Broad topic, concept, or entity name (1-3 words, e.g. 'Photosynthesis', 'Sasanian Empire', 'Albert Einstein'). Do NOT use full sentences, questions, or overly specific sub-details."
                         },
                         "book" => json::object! {
                             "type" => "string",
@@ -145,7 +146,7 @@ impl McpServer {
             },
             json::object! {
                 "name" => "zim_read_page",
-                "description" => "Read an article or page from a ZIM book. Returns clean, formatted Markdown by default.",
+                "description" => "Read an article or page from a ZIM book. Use this to read the full content of articles found via broad search to discover specific details, explanations, and answers. Returns clean, formatted Markdown by default.",
                 "inputSchema" => json::object! {
                     "type" => "object",
                     "properties" => json::object! {
